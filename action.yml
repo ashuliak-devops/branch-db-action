@@ -80,6 +80,7 @@ runs:
         SOURCE_DB: ${{ inputs.source_database_name }}
         ACTION: ${{ inputs.branch_action }}
         DB_CLUSTER: ${{ inputs.database_cluster }}
+        SQL_DUMP: ${{ inputs.sql_dump }}
       run: bash ${{ github.action_path }}/script.sh
 
     - name: Upload Dump.sql
