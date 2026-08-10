@@ -43,8 +43,6 @@ elif [[ $ACTION = "Create" ]] || [[ $ACTION = "Recreate" ]]; then
     dbExists=$(psql -U $DBUSERNAME -h $DBHOST -d postgres -qtAX -c "SELECT EXISTS(SELECT 1 AS result FROM pg_database WHERE datname='$DATABASE');")
     dbPrimaryComment=$(psql -qtAX -h $DBHOST -d postgres -U $DBUSERNAME -c "SELECT EXISTS(SELECT 1 AS result FROM pg_database WHERE datname = '$DATABASE' AND shobj_description( oid, 'pg_database') = 'primary');")
 
-    rm -f dump.sql
-
     # set error to exit script and errors on any part of pipe to fail
     set -eo pipefail
 
@@ -68,15 +66,8 @@ elif [[ $ACTION = "Create" ]] || [[ $ACTION = "Recreate" ]]; then
         psql -h $DBHOST -U $DBUSERNAME -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DATABASE';"
         dropdb --if-exists -h $DBHOST -U $DBUSERNAME $DATABASE
         createdb --owner=dev_role -h $DBHOST -U $DBUSERNAME $DATABASE --template=template0 --lc-collate=en_US.utf8 --lc-ctype=en_US.utf8 --encoding=UTF-8
-        if [ "$SQL_DUMP" = "true" ]; then
-            # dump.sql is uploaded as an artifact, so it has to be written to disk
-            dump_source_db > dump.sql
-            sed -i '1s/^/SET ROLE dev_role;\n/' dump.sql
-            psql -h $DBHOST -U $DBUSERNAME -d $DATABASE -f dump.sql -b
-        else
-            # stream into the target db instead: the dump no longer fits on the runner's disk
-            { echo "SET ROLE dev_role;"; dump_source_db; } | psql -h $DBHOST -U $DBUSERNAME -d $DATABASE -f - -b
-        fi
+        # SET ROLE first so restored objects end up owned by dev_role
+        { echo "SET ROLE dev_role;"; dump_source_db; } | psql -h $DBHOST -U $DBUSERNAME -d $DATABASE -f - -b
         psql -h $DBHOST -U $DBUSERNAME -d control_center -c "insert into log.branch_database (database_name, created_by_user, source_database) values ('$DATABASE', '$USERNAME', '$SOURCE_DB');" -b
         psql -h $DBHOST -U $DBUSERNAME -d $DATABASE -c "CREATE EVENT TRIGGER trigger_alter_ownership ON ddl_command_end when tag in ('CREATE TABLE', 'CREATE VIEW', 'CREATE MATERIALIZED VIEW', 'CREATE FUNCTION', 'CREATE INDEX') EXECUTE PROCEDURE db_admin.alter_ownership();" -b
         psql -h $DBHOST -U $DBUSERNAME -d $DATABASE -c "GRANT CREATE ON DATABASE \"$DATABASE\" TO dev_role, patriot_pay_deploy_user;" -b
